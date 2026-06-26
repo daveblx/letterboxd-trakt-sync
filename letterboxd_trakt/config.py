@@ -27,6 +27,7 @@ class TraktOAuth(BaseModel):
 class AccountInternal(BaseModel):
     trakt_oauth: TraktOAuth = TraktOAuth()
     last_letterboxd_diary_entry: date | None = None
+    last_letterboxd_ratings_sync: date | None = None
 
 
 class Account(BaseModel):
@@ -35,6 +36,7 @@ class Account(BaseModel):
     trakt_client_secret: str
     sync_diary: bool = True
     sync_watchlist: bool = True
+    sync_ratings: bool = True
     internal: AccountInternal = AccountInternal()
 
 

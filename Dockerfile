@@ -11,6 +11,6 @@ ENV SCHEDULED=true
 COPY . .
 
 # install requirements
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --force-reinstall -r requirements.txt
 
 CMD ["python", "-u", "-m", "letterboxd_trakt.main"]
