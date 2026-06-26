@@ -44,7 +44,10 @@ services:
 ```
 
 ### Usage
-
+Should have been fixed, but for some reason, you need to run this again:
+```bash
+docker exec letterboxd-trakt-sync pip install --force-reinstall letterboxdpy --break-system-packages
+```
 #### Initial run
 
 - On initial run a default config will be created in the `/config` directory. You then need to [fill in the values](#config).
