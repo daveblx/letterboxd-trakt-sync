@@ -1,4 +1,5 @@
 import datetime
+import gc
 import time
 
 import humanize
@@ -184,10 +185,10 @@ def sync(
     lb_watched: bool,
     lb_watch_date: datetime.date | None,
 ):
-    lb_imdb_id = extract_imdb_id_from_link(lb_movie.imdb_link)
+    lb_imdb_id = extract_imdb_id_from_link(lb_movie.pages.profile.get_imdb_link())
     if not lb_imdb_id:
         console.print(
-            f"Skipping '{lb_movie.title}' — no IMDb link found on Letterboxd.",
+            "Skipping — no IMDb link found on Letterboxd.",
             style="dim dark_red",
         )
         return False
@@ -313,6 +314,10 @@ def sync_letterboxd_diary(config: Config, account: Account):
         account.internal.last_letterboxd_diary_entry = entry["date"]
         config.save()
 
+    # free all cached movie DOM objects
+    movie_cache.clear()
+    gc.collect()
+
     console.print("Finished syncing diary!", style="purple4")
 
 
@@ -337,7 +342,9 @@ def sync_letterboxd_watchlist(config: Config, account: Account):
 
     for movie_id, movie_details in lb_watchlist["data"].items():
         lb_movie = LB_movie.Movie(movie_details["slug"])
-        lb_imdb_id = extract_imdb_id_from_link(lb_movie.imdb_link)
+        lb_imdb_id = extract_imdb_id_from_link(lb_movie.pages.profile.get_imdb_link())
+        movie_title = movie_details.get("name", movie_details["slug"])
+        del lb_movie
 
         if lb_imdb_id not in trakt_watchlist_imdb_ids:
             trakt_movie = get_trakt_movie(lb_imdb_id)
@@ -348,7 +355,7 @@ def sync_letterboxd_watchlist(config: Config, account: Account):
                 T_sync.add_to_watchlist(trakt_movie)
                 time.sleep(TRAKT_RATE_LIMIT)
 
-            console.print(f"Added {lb_movie.title} to watchlist", style="green")
+            console.print(f"Added {movie_title} to watchlist", style="green")
             trakt_watchlist_imdb_ids.append(lb_imdb_id)
 
     console.print("Finished syncing watchlist!", style="purple4")
@@ -356,78 +363,91 @@ def sync_letterboxd_watchlist(config: Config, account: Account):
 
 def sync_letterboxd_ratings(config: Config, account: Account):
     """Sync ratings for all Letterboxd-rated films to Trakt, including films
-    rated without a diary entry. Does not add watch history — ratings only."""
-    import datetime as _dt
+    rated without a diary entry. Does not add watch history — ratings only.
 
+    Iterates over each possible half-star rating value (0.5–5) separately so
+    we process one small batch at a time instead of loading the full film list
+    into memory at once.
+    """
     lb_user = get_letterboxd_user(account.letterboxd_username)
     if not lb_user:
         return
 
     console.print("Starting ratings sync from Letterboxd to Trakt", style="purple4")
 
-    # Fetch every film the user has rated on Letterboxd
-    try:
-        lb_all_films: dict = lb_user.pages.films.get_films()
-    except Exception:
-        console.print_exception()
-        return
-
-    # Build a dict of slug -> rating, skipping unrated entries
-    rated_films = {
-        slug: details
-        for slug, details in lb_all_films.get("movies", {}).items()
-        if details.get("rating") is not None
-    }
-
-    if not rated_films:
-        console.print("No rated films found on Letterboxd", style="dim purple4")
-        return
-
     trakt_user = T_user("me")
     trakt_movie_ratings: list[T_Movie] = trakt_user.get_ratings("movies")
 
-    # We pass an empty watch list — we're only syncing ratings, not watch history
-    trakt_movie_watches: list[T_Movie] = []
-
-    total = len(rated_films)
+    # All possible Letterboxd half-star rating values
+    LB_RATING_VALUES = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
     synced = 0
 
-    for i, (slug, details) in enumerate(rated_films.items()):
-        lb_rating = details["rating"]  # 0.5–5 half-star float
-        console.print(f"{i + 1}/{total}: {details.get('name', slug)}")
+    for lb_rating in LB_RATING_VALUES:
+        trakt_rating = int(lb_rating * 2)  # 0.5→1, 1.0→2 … 5.0→10
 
-        lb_movie = LB_movie.Movie(slug)
-        lb_imdb_id = extract_imdb_id_from_link(lb_movie.imdb_link)
-        if not lb_imdb_id:
+        try:
+            batch = lb_user.pages.films.get_films_rated(lb_rating)
+        except Exception:
             console.print(
-                f"Skipping '{details.get('name', slug)}' — no IMDb link found.",
-                style="dim dark_red",
+                f"Failed to fetch films rated {lb_rating}★", style="dim dark_red"
             )
+            console.print_exception()
             continue
 
-        trakt_rating = int(lb_rating * 2)
-
-        needs_rating = get_needs_trakt_rating(
-            trakt_rating, None, lb_imdb_id, trakt_movie_ratings
-        )
-        if not needs_rating:
+        films: dict = batch.get("movies", {})
+        if not films:
+            del batch
             continue
-
-        trakt_movie = get_trakt_movie(lb_imdb_id)
-        if not trakt_movie:
-            continue
-
-        if not DRY_RUN:
-            T_sync.rate(trakt_movie, trakt_rating, None)
-            time.sleep(TRAKT_RATE_LIMIT)
 
         console.print(
-            f"Added rating of {trakt_rating}/10 (LB: {lb_rating}★)",
-            style="green",
+            f"Processing {len(films)} films rated {lb_rating}★ ({trakt_rating}/10)",
+            style="dim purple4",
         )
-        synced += 1
 
-    account.internal.last_letterboxd_ratings_sync = _dt.date.today()
+        for i, (slug, details) in enumerate(films.items()):
+            console.print(f"  {i + 1}/{len(films)}: {details.get('name', slug)}")
+
+            lb_movie = LB_movie.Movie(slug)
+            lb_imdb_id = extract_imdb_id_from_link(
+                lb_movie.pages.profile.get_imdb_link()
+            )
+            del lb_movie  # free DOM immediately — don't let these accumulate
+
+            if not lb_imdb_id:
+                console.print(
+                    f"Skipping '{details.get('name', slug)}' — no IMDb link found.",
+                    style="dim dark_red",
+                )
+                continue
+
+            needs_rating = get_needs_trakt_rating(
+                trakt_rating, None, lb_imdb_id, trakt_movie_ratings
+            )
+            if not needs_rating:
+                continue
+
+            trakt_movie = get_trakt_movie(lb_imdb_id)
+            if not trakt_movie:
+                continue
+
+            if not DRY_RUN:
+                T_sync.rate(trakt_movie, trakt_rating, None)
+                time.sleep(TRAKT_RATE_LIMIT)
+
+            console.print(
+                f"Added rating {trakt_rating}/10 (LB: {lb_rating}★)",
+                style="green",
+            )
+            synced += 1
+            del trakt_movie
+
+        del batch, films
+        gc.collect()  # return memory to OS between rating batches
+
+    del trakt_movie_ratings
+    gc.collect()
+
+    account.internal.last_letterboxd_ratings_sync = datetime.date.today()
     config.save()
 
     console.print(
