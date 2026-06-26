@@ -20,8 +20,14 @@ WATCH_SEARCH_RANGE_HOURS = 48
 # TODO: could possibly look at last activity and see if theres anything missing from there to the next thing in user_films and warn/fill in gaps?
 
 
-def extract_imdb_id_from_link(imdb_link: str):
-    return imdb_link.split("/")[-2]
+def extract_imdb_id_from_link(imdb_link: str | None):
+    """Extract IMDb ID from an IMDb URL. Returns None if the link is missing or malformed."""
+    if not imdb_link:
+        return None
+    try:
+        return imdb_link.split("/")[-2]
+    except (AttributeError, IndexError):
+        return None
 
 
 def convert_trakt_datetime_str(rated_at: str):
@@ -179,9 +185,18 @@ def sync(
     lb_watch_date: datetime.date | None,
 ):
     lb_imdb_id = extract_imdb_id_from_link(lb_movie.imdb_link)
+    if not lb_imdb_id:
+        console.print(
+            f"Skipping '{lb_movie.title}' — no IMDb link found on Letterboxd.",
+            style="dim dark_red",
+        )
+        return False
+
+    # Letterboxd ratings are 0.5–5 (half-stars); Trakt expects 1–10. Multiply by 2.
+    trakt_rating = int(lb_rating * 2) if lb_rating else None
 
     needs_trakt_rating = get_needs_trakt_rating(
-        lb_rating, lb_rating_date, lb_imdb_id, trakt_movie_ratings
+        trakt_rating, lb_rating_date, lb_imdb_id, trakt_movie_ratings
     )
     needs_trakt_watch = get_needs_trakt_watch(
         lb_imdb_id, lb_watch_date, trakt_movie_watches
@@ -195,10 +210,13 @@ def sync(
 
     if needs_trakt_rating:
         if not DRY_RUN:
-            T_sync.rate(trakt_movie, lb_rating, lb_rating_date)
+            T_sync.rate(trakt_movie, trakt_rating, lb_rating_date)
             time.sleep(TRAKT_RATE_LIMIT)
 
-        console.print(f"Added rating of {lb_rating} at {lb_rating_date}", style="green")
+        console.print(
+            f"Added rating of {trakt_rating}/10 (LB: {lb_rating}★) at {lb_rating_date}",
+            style="green",
+        )
 
     if needs_trakt_watch:
         if not DRY_RUN:
@@ -221,12 +239,15 @@ def get_diary(lb_user: LB_user.User, last_diary_entry: datetime.date | None = No
             return lb_diary_to_process
 
         for entry_key, entry in lb_page_diary_entries.items():
-            # convert date dict to date object
-            entry["date"] = datetime.date(
-                entry["date"]["year"],
-                entry["date"]["month"],
-                entry["date"]["day"],
-            )
+            # convert date to a date object — letterboxdpy may return a dict or an ISO string
+            date_val = entry["date"]
+            if isinstance(date_val, dict):
+                entry["date"] = datetime.date(
+                    date_val["year"], date_val["month"], date_val["day"]
+                )
+            elif isinstance(date_val, str):
+                entry["date"] = datetime.date.fromisoformat(date_val[:10])
+            # else: already a datetime.date, leave as-is
 
             if last_diary_entry:
                 if entry["date"] <= last_diary_entry:
