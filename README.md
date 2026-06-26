@@ -2,7 +2,7 @@
 
 Script to sync your Letterboxd watched films, ratings and watchlist to your Trakt account.
 
-> NOTE: For watched/rated films, currently this only syncs diary entries, and is Letterboxd -> Trakt only (no Trakt -> Letterboxd)
+> NOTE: For watched/rated films, diary entries are synced with full watch dates. Ratings without diary entries are also synced via the `sync_ratings` option. Sync is Letterboxd → Trakt only (no Trakt → Letterboxd).
 
 ## Config
 
@@ -43,11 +43,6 @@ services:
       - /<host_folder_config>:/config
 ```
 
-### Usage
-Should have been fixed, but for some reason, you need to run this again:
-```bash
-docker exec letterboxd-trakt-sync pip install --force-reinstall letterboxdpy --break-system-packages
-```
 #### Initial run
 
 - On initial run a default config will be created in the `/config` directory. You then need to [fill in the values](#config).
@@ -63,3 +58,11 @@ docker exec letterboxd-trakt-sync pip install --force-reinstall letterboxdpy --b
 - `SCHEDULED`: runs on a schedule. default is `true` in docker, `false` otherwise.
   - `RUN_ON_START`: set to `true` to run the script immediately on container start.
   - `CRON_SCHEDULE`: sets the cron schedule for running the script (default: `"0 * * * *"` - every hour)
+
+### Config options
+
+| Option | Default | Description |
+|---|---|---|
+| `sync_diary` | `true` | Sync Letterboxd diary entries (watches + ratings) to Trakt |
+| `sync_watchlist` | `true` | Sync Letterboxd watchlist to Trakt |
+| `sync_ratings` | `true` | Sync all Letterboxd ratings to Trakt, including films rated without a diary entry |
