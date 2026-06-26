@@ -27,7 +27,7 @@ docker run --rm \
     --name letterboxd-trakt-sync \
     -e RUN_ON_START=true \
     -v /<host_folder_config>:/config \
-    ghcr.io/f0e/letterboxd-trakt-sync:latest
+    ghcr.io/daveblx/letterboxd-trakt-sync:latest
 ```
 
 ### compose
@@ -36,7 +36,7 @@ docker run --rm \
 services:
   letterboxd-trakt-sync:
     container_name: letterboxd-trakt-sync
-    image: ghcr.io/f0e/letterboxd-trakt-sync:latest
+    image: ghcr.io/daveblx/letterboxd-trakt-sync:latest
     environment:
       - RUN_ON_START=true
     volumes:
