@@ -1,12 +1,12 @@
 # Letterboxd Trakt Sync
 
-## Disclaimer
-
-This project will not be updated any further, because Trakt...
-
 Script to sync your Letterboxd watched films, ratings and watchlist to your Trakt account.
 
 > NOTE: For watched/rated films, diary entries are synced with full watch dates. Ratings without diary entries are also synced via the `sync_ratings` option. Sync is Letterboxd → Trakt only (no Trakt → Letterboxd).
+
+## Disclaimer
+
+This project will not be updated any further, because Trakt...
 
 ## Config
 
